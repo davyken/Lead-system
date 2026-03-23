@@ -11,7 +11,10 @@ const PORT    = process.env.PORT || 3000;
 const IS_PROD = process.env.NODE_ENV === "production";
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
-app.use(cors());
+app.use(cors({
+  origin: ["https://lead-system-pi.vercel.app", "http://localhost:5173", "http://localhost:3000"],
+  credentials: true
+}));
 app.use(express.json());
 
 if (IS_PROD) {
