@@ -66,6 +66,16 @@ function startBot(leads) {
     return;
   }
   leadsRef = leads;
+  
+  // Stop any existing bot instance first
+  if (bot) {
+    try {
+      bot.stopPolling();
+    } catch (e) {
+      // Ignore errors when stopping
+    }
+  }
+  
   try {
     bot = new TelegramBot(token, { polling: true });
 

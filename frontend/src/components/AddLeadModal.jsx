@@ -1,8 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import { API } from "../api";
 
+const DESCRIPTION_OPTIONS = [
+  { value: "", label: "Sélectionner une catégorie (optionnel)" },
+  { value: "Frontend Development", label: "Frontend Development" },
+  { value: "Backend Development", label: "Backend Development" },
+  { value: "Full Stack Development", label: "Full Stack Development" },
+  { value: "DevOps / SRE", label: "DevOps / SRE" },
+  { value: "Data Science / ML", label: "Data Science / ML" },
+  { value: "Mobile Development", label: "Mobile Development" },
+  { value: "Design / UX", label: "Design / UX" },
+  { value: "Product Management", label: "Product Management" },
+  { value: "Other", label: "Other" },
+];
+
 export default function AddLeadModal({ onClose, onAdded }) {
-  const [form, setForm] = useState({ text: "", link: "", score: 5, message: "", source: "manual" });
+  const [form, setForm] = useState({ text: "", link: "", score: 5, message: "", source: "manual", description: "" });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const firstInputRef = useRef(null);
@@ -49,6 +62,7 @@ export default function AddLeadModal({ onClose, onAdded }) {
           score: Number(form.score),
           message: form.message.trim(),
           source: form.source,
+          description: form.description,
         }),
       });
 
@@ -242,6 +256,29 @@ export default function AddLeadModal({ onClose, onAdded }) {
                 <option value="referral">Référence</option>
                 <option value="inbound">Inbound</option>
                 <option value="other">Autre</option>
+              </select>
+            </div>
+
+            {/* Description */}
+            <div>
+              <label
+                htmlFor="lead-description"
+                style={{ display: "block", fontSize: "0.75rem", textTransform: "uppercase",
+                         letterSpacing: "0.08em", color: "var(--muted)", fontFamily: "var(--font-mono)",
+                         marginBottom: "0.4rem" }}
+              >
+                Catégorie
+              </label>
+              <select
+                id="lead-description"
+                className="select"
+                value={form.description}
+                onChange={set("description")}
+                style={{ width: "100%" }}
+              >
+                {DESCRIPTION_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
               </select>
             </div>
 

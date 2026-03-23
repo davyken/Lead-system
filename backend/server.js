@@ -3,12 +3,12 @@ const express = require("express");
 const cors    = require("cors");
 const path    = require("path");
 const fs      = require("fs");
+const { connectDB, Lead, User, startCleanupInterval } = require("./db");
 const { startBot, sendLeadToTelegram } = require("./telegram");
 
 const app     = express();
 const PORT    = process.env.PORT || 3000;
 const IS_PROD = process.env.NODE_ENV === "production";
-const DATA_FILE = path.join(__dirname, "leads.json");
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 app.use(cors());
@@ -19,112 +19,217 @@ if (IS_PROD) {
   if (fs.existsSync(staticPath)) app.use(express.static(staticPath));
 }
 
-// ─── Persistence ──────────────────────────────────────────────────────────────
-function loadLeads() {
-  try {
-    if (fs.existsSync(DATA_FILE)) return JSON.parse(fs.readFileSync(DATA_FILE, "utf-8"));
-  } catch (e) { console.error("⚠️  Could not load leads.json:", e.message); }
-  return [];
-}
+// ─── Connect to MongoDB ───────────────────────────────────────────────────────
+connectDB();
 
-function saveLeads(leads) {
-  try { fs.writeFileSync(DATA_FILE, JSON.stringify(leads, null, 2)); }
-  catch (e) { console.error("⚠️  Could not save leads.json:", e.message); }
-}
-
-let leads = loadLeads();
-const VALID_STATUSES = ["new","contacted","qualified","closed","rejected"];
+const VALID_STATUSES = ["new", "contacted", "qualified", "closed", "rejected"];
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
-app.get("/api/health", (req, res) =>
-  res.json({ status: "ok", leads: leads.length, uptime: Math.round(process.uptime()) })
-);
+// ─── Health check ─────────────────────────────────────────────────────────────
+app.get("/api/health", async (req, res) => {
+  const total = await Lead.countDocuments();
+  res.json({ status: "ok", leads: total, uptime: Math.round(process.uptime()) });
+});
 
-app.get("/api/leads", (req, res) => {
-  const { status, minScore, maxScore, q, source } = req.query;
-  let result = [...leads];
-  if (status && VALID_STATUSES.includes(status)) result = result.filter(l => l.status === status);
-  if (minScore) result = result.filter(l => l.score >= Number(minScore));
-  if (maxScore) result = result.filter(l => l.score <= Number(maxScore));
-  if (source)   result = result.filter(l => l.source?.toLowerCase() === source.toLowerCase());
-  if (q) {
-    const lower = q.toLowerCase();
-    result = result.filter(l => l.text?.toLowerCase().includes(lower) || l.message?.toLowerCase().includes(lower));
+// ─── AUTH ROUTES ──────────────────────────────────────────────────────────────────
+
+// Register new user
+app.post("/api/auth/register", async (req, res) => {
+  const { email, password } = req.body;
+  
+  if (!email?.trim() || !password?.trim()) {
+    return res.status(400).json({ error: "Email and password are required" });
   }
-  result.sort((a, b) => b.score - a.score || new Date(b.created_at) - new Date(a.created_at));
-  res.json(result);
+  
+  if (password.length < 6) {
+    return res.status(400).json({ error: "Password must be at least 6 characters" });
+  }
+  
+  try {
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    if (existingUser) {
+      return res.status(400).json({ error: "Email already registered" });
+    }
+    
+    const user = await User.create({
+      email: email.toLowerCase().trim(),
+      password: password // In production, hash this with bcrypt!
+    });
+    
+    res.status(201).json({ message: "Account created successfully", userId: user._id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.get("/api/leads/:id", (req, res) => {
-  const lead = leads.find(l => l.id === Number(req.params.id));
-  if (!lead) return res.status(404).json({ error: "Lead not found" });
-  res.json(lead);
+// Login
+app.post("/api/auth/login", async (req, res) => {
+  const { email, password } = req.body;
+  
+  if (!email?.trim() || !password?.trim()) {
+    return res.status(400).json({ error: "Email and password are required" });
+  }
+  
+  try {
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) {
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
+    
+    if (user.password !== password) {
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
+    
+    res.json({ message: "Login successful", user: { email: user.email, id: user._id } });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
+// ─── GET all leads (with filters) ─────────────────────────────────────────────
+app.get("/api/leads", async (req, res) => {
+  try {
+    const { status, minScore, maxScore, source, q, favorite } = req.query;
+    const filter = {};
+
+    if (status)   filter.status = status;
+    if (source)   filter.source = source;
+    if (minScore) filter.score  = { ...filter.score, $gte: Number(minScore) };
+    if (maxScore) filter.score  = { ...filter.score, $lte: Number(maxScore) };
+    if (favorite === "true") filter.favorite = true;
+    if (q) filter.$or = [
+      { text:        { $regex: q, $options: "i" } },
+      { description: { $regex: q, $options: "i" } },
+      { message:     { $regex: q, $options: "i" } },
+      { source:      { $regex: q, $options: "i" } },
+    ];
+
+    const leads = await Lead.find(filter)
+      .sort({ favorite: -1, score: -1, created_at: -1 })
+      .limit(200);
+
+    res.json(leads);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GET single lead ───────────────────────────────────────────────────────────
+app.get("/api/leads/:id", async (req, res) => {
+  try {
+    const lead = await Lead.findById(req.params.id);
+    if (!lead) return res.status(404).json({ error: "Lead not found" });
+    res.json(lead);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── POST — Add new lead ───────────────────────────────────────────────────────
 app.post("/api/lead", async (req, res) => {
-  const { text, link, score, message, source } = req.body;
+  const { text, link, score, message, source, description, salary, email } = req.body;
+
   if (!text?.trim()) return res.status(400).json({ error: "'text' is required" });
 
-  const lead = {
-    id: Date.now(),
-    text: text.trim(),
-    link: link?.trim() || "",
-    score: Math.min(10, Math.max(0, Number(score) || 0)),
-    message: message?.trim() || "",
-    source: source?.trim() || "manual",
-    status: "new",
-    assigned_to: null,
-    // ADD THESE:
-    description: req.body.description?.trim() || "",
-    postedAt: req.body.postedAt || new Date().toISOString(),
-    expiresAt: req.body.expiresAt || null,
-    email: req.body.email || null,
-    salary: req.body.salary || "",
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  };
-  leads.push(lead);
-  saveLeads(leads);
-  sendLeadToTelegram(lead).catch(() => {});
-  res.status(201).json(lead);
+  try {
+    const lead = await Lead.create({
+      text:        text.trim(),
+      link:        link?.trim() || "",
+      score:       Math.min(10, Math.max(0, Number(score) || 0)),
+      message:     message?.trim() || "",
+      source:      source?.trim() || "manual",
+      description: description?.trim() || "",
+      salary:      salary?.trim() || "",
+      email:       email || null,
+      favorite:    false,
+      status:      "new",
+      assigned_to: null,
+    });
+
+    sendLeadToTelegram(lead).catch(() => {});
+    res.status(201).json(lead);
+  } catch (err) {
+    // Duplicate link — silently skip
+    if (err.code === 11000) return res.status(200).json({ duplicate: true });
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.patch("/api/leads/:id/status", (req, res) => {
+// ─── PATCH — Update status ─────────────────────────────────────────────────────
+app.patch("/api/leads/:id/status", async (req, res) => {
   const { status } = req.body;
-  if (!VALID_STATUSES.includes(status))
+  if (!VALID_STATUSES.includes(status)) {
     return res.status(400).json({ error: "Invalid status", valid: VALID_STATUSES });
-  const idx = leads.findIndex(l => l.id === Number(req.params.id));
-  if (idx === -1) return res.status(404).json({ error: "Lead not found" });
-  leads[idx] = { ...leads[idx], status, updated_at: new Date().toISOString() };
-  saveLeads(leads);
-  res.json(leads[idx]);
+  }
+  try {
+    const lead = await Lead.findByIdAndUpdate(
+      req.params.id,
+      { status, updated_at: new Date() },
+      { new: true }
+    );
+    if (!lead) return res.status(404).json({ error: "Lead not found" });
+    res.json(lead);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.delete("/api/leads/:id", (req, res) => {
-  const idx = leads.findIndex(l => l.id === Number(req.params.id));
-  if (idx === -1) return res.status(404).json({ error: "Lead not found" });
-  leads.splice(idx, 1);
-  saveLeads(leads);
-  res.json({ success: true });
+// ─── PATCH — Toggle favorite ───────────────────────────────────────────────────
+app.patch("/api/leads/:id/favorite", async (req, res) => {
+  try {
+    const lead = await Lead.findById(req.params.id);
+    if (!lead) return res.status(404).json({ error: "Lead not found" });
+
+    lead.favorite   = !lead.favorite;
+    lead.updated_at = new Date();
+    await lead.save();
+
+    res.json(lead);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.get("/api/stats", (req, res) => {
-  const byStatus = {}, bySource = {};
-  let totalScore = 0;
-  leads.forEach(l => {
-    byStatus[l.status] = (byStatus[l.status] || 0) + 1;
-    bySource[l.source] = (bySource[l.source] || 0) + 1;
-    totalScore += l.score;
-  });
-  res.json({
-    total: leads.length,
-    byStatus,
-    bySource,
-    avgScore: leads.length ? parseFloat((totalScore / leads.length).toFixed(1)) : 0,
-    hotLeads: leads.filter(l => l.score >= 7).length,
-    newLeads: byStatus.new || 0,
-  });
+// ─── DELETE — Remove lead ──────────────────────────────────────────────────────
+app.delete("/api/leads/:id", async (req, res) => {
+  try {
+    const lead = await Lead.findByIdAndDelete(req.params.id);
+    if (!lead) return res.status(404).json({ error: "Lead not found" });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GET stats ─────────────────────────────────────────────────────────────────
+app.get("/api/stats", async (req, res) => {
+  try {
+    const [total, newLeads, hotLeads, favorites, avgResult, bySource, byStatus, userCount] =
+      await Promise.all([
+        Lead.countDocuments(),
+        Lead.countDocuments({ status: "new" }),
+        Lead.countDocuments({ score: { $gte: 7 } }),
+        Lead.countDocuments({ favorite: true }),
+        Lead.aggregate([{ $group: { _id: null, avg: { $avg: "$score" } } }]),
+        Lead.aggregate([{ $group: { _id: "$source", count: { $sum: 1 } } }]),
+        Lead.aggregate([{ $group: { _id: "$status", count: { $sum: 1 } } }]),
+        User.countDocuments(),
+      ]);
+
+    res.json({
+      total,
+      newLeads,
+      hotLeads,
+      favorites,
+      userCount,
+      avgScore:  parseFloat(avgResult[0]?.avg?.toFixed(1) || 0),
+      bySource:  Object.fromEntries(bySource.map(s => [s._id, s.count])),
+      byStatus:  Object.fromEntries(byStatus.map(s => [s._id, s.count])),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ─── Manual scrape trigger (from dashboard or Telegram) ───────────────────────
@@ -148,13 +253,19 @@ if (IS_PROD) {
   });
 }
 
-// ─── Start ────────────────────────────────────────────────────────────────────
-app.listen(PORT, () => {
+// ─── Start ──────────────────────────────────────────────────────────────────
+app.listen(PORT, async () => {
+  const totalLeads = await Lead.countDocuments();
+  
+  // Start auto-cleanup interval (delete non-favorite leads after 12 hours)
+  startCleanupInterval();
+  
   console.log(`\n🚀 Lead System API on port ${PORT}`);
   console.log(`   Mode  : ${IS_PROD ? "production" : "development"}`);
-  console.log(`   Leads : ${leads.length} loaded`);
+  console.log(`   Leads : ${totalLeads} loaded`);
+  console.log(`   Auto-cleanup: enabled (12h)`);
   console.log(`   Health: http://localhost:${PORT}/api/health\n`);
-  startBot(leads);
+  startBot([]);
 });
 
-module.exports = { leads };
+module.exports = app;
