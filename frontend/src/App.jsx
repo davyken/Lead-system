@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Leads from "./components/Leads";
 import Stats from "./components/Stats";
+import InstallPrompt from "./components/InstallPrompt";
 
 export default function App() {
   const [stats, setStats] = useState(null);
@@ -59,6 +60,9 @@ export default function App() {
       <main id="main-content" className="main" role="main">
         <Leads onLeadChanged={onLeadChanged} />
       </main>
+
+      {/* ─── PWA Install Prompt ────────────────────────────────────── */}
+      <InstallPrompt />
     </>
   );
 }
