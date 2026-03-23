@@ -51,8 +51,22 @@ async function connectDB() {
     console.log("✅ MongoDB connected");
   } catch (err) {
     console.error("❌ MongoDB connection failed:", err.message);
-    process.exit(1);
+    console.log("   Server will continue without database until connection is restored");
+    // Don't exit - let the server continue running
   }
+  
+  // Handle connection events for auto-reconnect
+  mongoose.connection.on('connected', () => {
+    console.log("✅ MongoDB reconnected");
+  });
+  
+  mongoose.connection.on('disconnected', () => {
+    console.warn("⚠️  MongoDB disconnected - will retry automatically");
+  });
+  
+  mongoose.connection.on('error', (err) => {
+    console.error("❌ MongoDB error:", err.message);
+  });
 }
 
 // Auto-delete leads older than 12 hours (except favorites)

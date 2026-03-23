@@ -258,18 +258,36 @@ if (IS_PROD) {
 }
 
 // ─── Start ──────────────────────────────────────────────────────────────────
-app.listen(PORT, async () => {
-  const totalLeads = await Lead.countDocuments();
-  
-  // Start auto-cleanup interval (delete non-favorite leads after 12 hours)
-  startCleanupInterval();
-  
-  console.log(`\n🚀 Lead System API on port ${PORT}`);
-  console.log(`   Mode  : ${IS_PROD ? "production" : "development"}`);
-  console.log(`   Leads : ${totalLeads} loaded`);
-  console.log(`   Auto-cleanup: enabled (12h)`);
-  console.log(`   Health: http://localhost:${PORT}/api/health\n`);
-  startBot([]);
+// Start server even if DB is not ready - handle connection in routes
+app.listen(PORT, '0.0.0.0', () => {
+  try {
+    console.log(`\n🚀 Lead System API on port ${PORT}`);
+    console.log(`   Mode  : ${IS_PROD ? "production" : "development"}`);
+    
+    // Try to get lead count, but don't fail if DB not ready
+    Lead.countDocuments()
+      .then(total => {
+        console.log(`   Leads : ${total} loaded`);
+        startCleanupInterval();
+        console.log(`   Auto-cleanup: enabled (12h)`);
+      })
+      .catch(err => {
+        console.warn("   ⚠️  Database not ready yet:", err.message);
+        console.log("   API will work, but some features may be limited");
+      });
+
+    // Start Telegram bot with leads collection (non-blocking)
+    Lead.find({}).limit(100).then(leads => {
+      startBot(leads).catch(err => console.warn("   ⚠️  Telegram bot disabled:", err.message));
+    }).catch(() => {
+      // If we can't get leads, try anyway (will just have empty list)
+      startBot([]).catch(err => console.warn("   ⚠️  Telegram bot disabled:", err.message));
+    });
+    
+    console.log(`   Health: http://localhost:${PORT}/api/health\n`);
+  } catch (err) {
+    console.error("❌ Server startup error:", err.message);
+  }
 });
 
 module.exports = app;
