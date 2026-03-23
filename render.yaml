@@ -16,3 +16,5 @@ services:
         sync: false   # Set this manually in the Render dashboard
       - key: TELEGRAM_CHAT_ID
         sync: false   # Set this manually in the Render dashboard
+      - key: FRONTEND_URLS
+        value: https://lead-system-pi.vercel.app,http://localhost:5173

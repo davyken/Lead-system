@@ -13,15 +13,37 @@ const IS_PROD = process.env.NODE_ENV === "production";
 // ─── Middleware ───────────────────────────────────────────────────────────────
 // Allow all origins for development - in production, restrict this
 app.use(cors({
-  origin: true,
-  credentials: true
+  origin: process.env.FRONTEND_URLS?.split(',') || ['https://lead-system-pi.vercel.app', 'http://localhost:5173'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json());
+
+// Explicit preflight handler
+app.options('*', cors());
 
 if (IS_PROD) {
   const staticPath = path.join(__dirname, "../frontend/dist");
   if (fs.existsSync(staticPath)) app.use(express.static(staticPath));
 }
+
+// CORS safety net headers (after all middleware)
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && (process.env.FRONTEND_URLS?.split(',').includes(origin) || origin.includes('localhost'))) {
+    res.header('Access-Control-Allow-Origin', origin);
+  } else {
+    res.header('Access-Control-Allow-Origin', '*');
+  }
+  res.header('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
 
 // ─── Connect to MongoDB ───────────────────────────────────────────────────────
 connectDB();
