@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: lead-system
+    env: node
+    plan: free
+    region: frankfurt  # or oregon / singapore — pick closest to your users
+    buildCommand: npm install && npm run build
+    startCommand: node backend/server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false   # Set this manually in the Render dashboard
+      - key: TELEGRAM_CHAT_ID
+        sync: false   # Set this manually in the Render dashboard
