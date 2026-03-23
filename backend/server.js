@@ -298,13 +298,18 @@ app.listen(PORT, '0.0.0.0', () => {
         console.log("   API will work, but some features may be limited");
       });
 
-    // Start Telegram bot with leads collection (non-blocking)
-    Lead.find({}).limit(100).then(leads => {
-      startBot(leads).catch(err => console.warn("   ⚠️  Telegram bot disabled:", err.message));
-    }).catch(() => {
-      // If we can't get leads, try anyway (will just have empty list)
-      startBot([]).catch(err => console.warn("   ⚠️  Telegram bot disabled:", err.message));
-    });
+// Start Telegram bot safely (non-blocking)
+    Promise.resolve()
+      .then(async () => {
+        try {
+          const leads = await Lead.find({}).limit(100).catch(() => []);
+          if (typeof startBot === 'function') {
+            await startBot(leads);
+          }
+        } catch (err) {
+          console.warn("   ⚠️  Telegram bot disabled:", err.message);
+        }
+      });
     
     console.log(`   Health: http://localhost:${PORT}/api/health\n`);
   } catch (err) {
