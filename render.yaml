@@ -10,6 +10,8 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: MONGODB_URI
+        sync: false   # Set this manually in the Render dashboard
       - key: TELEGRAM_BOT_TOKEN
         sync: false   # Set this manually in the Render dashboard
       - key: TELEGRAM_CHAT_ID
