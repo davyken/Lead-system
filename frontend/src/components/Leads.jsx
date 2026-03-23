@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import LeadCard from "./LeadCard";
 import AddLeadModal from "./AddLeadModal";
+import { API } from "../api";
 
 const SOURCES = [
   "RemoteOK","Remotive","Jobicy","Arbeitnow",
@@ -43,7 +44,7 @@ export default function Leads({ onLeadChanged }) {
       if (minScore)      p.set("minScore", minScore);
       if (source)        p.set("source",   source);
       if (query.trim())  p.set("q",        query.trim());
-      const res = await fetch(`/api/leads?${p}`);
+      const res = await fetch(`${API}/api/leads?${p}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setLeads(await res.json());
       setError(null);
@@ -65,7 +66,7 @@ export default function Leads({ onLeadChanged }) {
 
   async function handleStatusChange(id, newStatus) {
     try {
-      const res = await fetch(`/api/leads/${id}/status`, {
+      const res = await fetch(`${API}/api/leads/${id}/status`, {
         method:"PATCH", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({ status: newStatus }),
       });
@@ -79,7 +80,7 @@ export default function Leads({ onLeadChanged }) {
   async function handleDelete(id) {
     if (!window.confirm("Delete this lead permanently?")) return;
     try {
-      const res = await fetch(`/api/leads/${id}`, { method:"DELETE" });
+      const res = await fetch(`${API}/api/leads/${id}`, { method:"DELETE" });
       if (!res.ok) throw new Error();
       setLeads(prev => prev.filter(l => l.id !== id));
       onLeadChanged?.();
@@ -91,7 +92,7 @@ export default function Leads({ onLeadChanged }) {
     setScraping(true);
     showToast("🕷️ Scrape started — new leads will appear shortly…");
     try {
-      await fetch("/api/scrape", { method:"POST" });
+      await fetch(`${API}/api/scrape`, { method:"POST" });
       // Poll for new leads after 10s
       setTimeout(() => { fetchLeads(); onLeadChanged?.(); }, 10000);
       setTimeout(() => { fetchLeads(); onLeadChanged?.(); setScraping(false); }, 30000);

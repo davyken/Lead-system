@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { API } from "../api";
 
 export default function AddLeadModal({ onClose, onAdded }) {
   const [form, setForm] = useState({ text: "", link: "", score: 5, message: "", source: "manual" });
@@ -39,7 +40,7 @@ export default function AddLeadModal({ onClose, onAdded }) {
 
     setSubmitting(true);
     try {
-      const res = await fetch("/api/lead", {
+      const res = await fetch(`${API}/api/lead`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import Leads from "./components/Leads";
 import Stats from "./components/Stats";
 import InstallPrompt from "./components/InstallPrompt";
+import { API } from "./api";
 
 export default function App() {
   const [stats, setStats] = useState(null);
@@ -9,7 +10,7 @@ export default function App() {
 
   const fetchStats = useCallback(async () => {
     try {
-      const res = await fetch("/api/stats");
+      const res = await fetch(`${API}/api/stats`);
       if (res.ok) setStats(await res.json());
     } catch {
       // Silently fail — stats are decorative
